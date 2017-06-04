@@ -25,3 +25,4 @@ executable llvm-practice
                      , llvm-hs-pure
                      , mtl
                      , process
+                     , bytestring

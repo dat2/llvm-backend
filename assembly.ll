@@ -1,8 +1,8 @@
 ; ModuleID = 'assembly.ll'
 source_filename = "source.silver"
 
-define i32 @main() {
+define float @main() {
 entry:
-  %0 = add i32 3, 2
-  ret i32 %0
+  %0 = fadd float 3.000000e+00, 2.000000e+00
+  ret float %0
 }

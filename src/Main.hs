@@ -6,8 +6,7 @@ import Control.Monad.Cont
 import IR
 import Codegen
 
-ast :: Expr
-ast = Add (Add (Const 1) (Const 2)) (Sub (Const 5) (Const 3))
+ast = FAdd (FAdd (ConstFloat 1.0) (ConstFloat 2.0)) (FSub (ConstFloat 5.0) (ConstFloat 3.0))
 
 main :: IO ()
-main = evalCodegen (codegen ast)
+main = evalCodegen (codegen "assembly" (genFloatExpr ast >> return ()))
