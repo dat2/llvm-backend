@@ -41,12 +41,10 @@ mainFunc = Function {
 
 irModule = Module { mName = "assembly", mSource = "source.silver", mFunctions = [fadd, iadd, inc, doubleInc, mainFunc] }
 
--- TODO IR Ref should check function params if it exists
+-- TODO build symbol table
 -- TODO execution engine
--- TODO main function
 -- TODO all integer types
 -- TODO string type
--- TODO function call
 
 main :: IO ()
 main = do

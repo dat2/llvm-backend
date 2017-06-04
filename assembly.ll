@@ -12,3 +12,22 @@ entry:
   %1 = add nuw i32 %x, %0
   ret i32 %1
 }
+
+define i32 @inc(i32 %x) {
+entry:
+  %0 = add nuw i32 %x, 1
+  ret i32 %0
+}
+
+define i32 @doubleInc(i32 %x) {
+entry:
+  %0 = call i32 @inc(i32 %x)
+  %1 = call i32 @inc(i32 %0)
+  ret i32 %1
+}
+
+define i32 @main() {
+entry:
+  %0 = call i32 @doubleInc(i32 -2)
+  ret i32 %0
+}
