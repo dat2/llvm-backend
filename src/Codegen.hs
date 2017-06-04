@@ -75,25 +75,25 @@ float32 :: Float -> Operand
 float32 = ConstantOperand . Float . Single
 
 -- create a fake module
-astModule :: ShortByteString -> ShortByteString -> [Named Instruction] -> Word -> A.Module
-astModule source name instructions result = A.defaultModule {
+initialModule :: ShortByteString -> ShortByteString -> A.Module
+initialModule source name = A.defaultModule {
     A.moduleName = name
   , A.moduleSourceFileName = source
-  , A.moduleDefinitions = [ func float32Type "main" [ block "entry" instructions (ret (ref (UnName result) float32Type)) ] ]
+  , A.moduleDefinitions = [ ]
   }
 
 -- monad
-data CodegenState = CodegenState { codegenId :: Word, codegenInstructions :: [Named Instruction] }
+data CodegenState = CodegenState { cId :: Word, cInstructions :: [Named Instruction], cModule :: A.Module }
   deriving (Show, Eq)
 
-initialState :: CodegenState
-initialState = CodegenState { codegenId = 0, codegenInstructions = [] }
+initialState :: ShortByteString -> ShortByteString -> CodegenState
+initialState sourceName moduleName = CodegenState { cId = 0, cInstructions = [], cModule = initialModule sourceName moduleName  }
 
 newtype Codegen a b = Codegen { runCodegen :: StateT CodegenState (ContT a IO) b }
   deriving (Functor, Applicative, Monad, MonadState CodegenState, MonadCont, MonadIO)
 
-evalCodegen :: Codegen () () -> IO ()
-evalCodegen = (flip runContT) return . (flip evalStateT) initialState . runCodegen
+evalCodegen :: ShortByteString -> ShortByteString -> Codegen () () -> IO ()
+evalCodegen sourceName moduleName = (flip runContT) return . (flip evalStateT) (initialState sourceName moduleName) . runCodegen
 
 liftCont :: ContT a IO b -> Codegen a b
 liftCont cont = Codegen $ StateT $ \state -> do
@@ -102,14 +102,26 @@ liftCont cont = Codegen $ StateT $ \state -> do
 
 nextId :: Codegen a Word
 nextId = do
-  id <- gets codegenId
-  modify $ \state -> state { codegenId = id + 1 }
+  id <- gets cId
+  modify $ \state -> state { cId = id + 1 }
   return id
 
 append :: Named Instruction -> Codegen a ()
 append i = do
-  instructions <- gets codegenInstructions
-  modify $ \state -> state { codegenInstructions = i : instructions }
+  instructions <- gets cInstructions
+  modify $ \state -> state { cInstructions = i : instructions }
+
+makeFunc :: Word -> [Named Instruction] -> Definition
+makeFunc returnId instructions = func float32Type "main" [ block "entry" instructions (ret (ref (UnName returnId) float32Type)) ]
+
+addFunc :: Word -> [Named Instruction] -> Codegen a ()
+addFunc returnId instructions = do
+  let f = makeFunc returnId instructions
+  oldModule <- gets cModule
+  let moduleDefinitions = A.moduleDefinitions oldModule
+  let newModule = oldModule { A.moduleDefinitions = moduleDefinitions ++ [f] }
+
+  modify $ \state -> state { cModule = newModule }
 
 typedAdd :: Type -> Operand -> Operand -> Instruction
 typedAdd t a b
@@ -150,16 +162,15 @@ makeModule c m = ContT $ M.withModuleFromAST c m
 hostTargetMachine :: ContT a IO TargetMachine
 hostTargetMachine = ContT withHostTargetMachine
 
-codegen :: String -> Codegen a () -> Codegen a ()
-codegen out genBody = do
-  let llfile = S.toShort $ C.pack $ out ++ ".ll"
+codegen :: Codegen a () -> Codegen a ()
+codegen genBody = do
 
   -- generate the expression
   genBody
-  instructions <- gets codegenInstructions
-  id <- gets codegenId
-
-  let mod = astModule "source.silver" llfile instructions (id - 1)
+  instructions <- gets cInstructions
+  id <- gets cId
+  addFunc (id - 1) instructions
+  mod <- gets cModule
 
   -- make a context
   ctx <- liftCont context
@@ -167,11 +178,11 @@ codegen out genBody = do
 
   -- check that it works
   liftIO $ verify llModule
-  liftIO $ M.writeLLVMAssemblyToFile (M.File (out ++ ".ll")) llModule
+  liftIO $ M.writeLLVMAssemblyToFile (M.File "assembly.ll") llModule
 
   -- create an object file
   target <- liftCont $ hostTargetMachine
-  liftIO $ M.writeObjectToFile target (M.File (out ++ ".o")) llModule
+  liftIO $ M.writeObjectToFile target (M.File "assembly.o") llModule
 
   -- link the object file
-  liftIO $ callCommand $ "ld -macosx_version_min 10.12 -arch x86_64 -lSystem -o " ++ out ++ " " ++ out ++ ".o"
+  liftIO $ callCommand $ "ld -macosx_version_min 10.12 -arch x86_64 -lSystem -o assembly assembly.o"
