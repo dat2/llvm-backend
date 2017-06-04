@@ -6,6 +6,7 @@ data Expr =
   | Add Expr Expr
   | Sub Expr Expr
   | Ref Type String
+  | Call String Type [Type] [Expr]
   deriving (Show, Eq)
 
 data Type =

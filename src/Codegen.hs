@@ -14,7 +14,8 @@ import LLVM.Internal.Target
 
 import LLVM.Prelude
 import LLVM.AST (Definition(..))
-import LLVM.AST.Constant (Constant(Int, Float))
+import LLVM.AST.CallingConvention
+import LLVM.AST.Constant (Constant(Int, Float, GlobalReference))
 import LLVM.AST.Float
 import LLVM.AST.Global
 import LLVM.AST.Instruction
@@ -35,6 +36,9 @@ int32Type = IntegerType 32
 
 float32Type :: Type
 float32Type = FloatingPointType FloatFP
+
+functionType :: Type -> [Type] -> Type
+functionType returnType paramTypes = FunctionType returnType paramTypes False
 
 irToLlvmType :: I.Type -> Type
 irToLlvmType I.TInt32 = int32Type
@@ -68,6 +72,9 @@ isub32 a b = Sub False True a b []
 
 fsub :: Operand -> Operand -> Instruction
 fsub a b = FSub (FastMathFlags True True True True) a b []
+
+call :: String -> Type -> [Operand] -> Instruction
+call fName fType ops = Call Nothing C [] (Right (ConstantOperand $ GlobalReference fType (fromString fName))) (map (\op -> (op, [])) ops) [] []
 
 -- terminators
 ret :: Operand -> Named Terminator
@@ -174,6 +181,15 @@ codegenExpr (I.Sub a b) = do
   checkType (a, aType) (b, bType)
   append $ UnName id := subType aType aOp bOp
   return $ (LocalReference aType (UnName id), aType)
+codegenExpr (I.Call s fReturnType fParamTypes args) = do
+  refs <- mapM codegenExpr args
+  -- TODO check types between args?
+  let refOps = map fst refs
+  let refTypes = map snd refs
+
+  id <- nextId
+  append $ UnName id := call (fromString s) (functionType (irToLlvmType fReturnType) (map irToLlvmType fParamTypes)) refOps
+  return $ (LocalReference (irToLlvmType fReturnType) (UnName id), (irToLlvmType fReturnType))
 
 -- | based on the llvm type, determine which llvm instruction to call for the operands
 addType :: Type -> Operand -> Operand -> Instruction
@@ -235,4 +251,4 @@ llvmCodegen moduleName astModule = (flip runContT) return $ do
   liftIO $ M.writeObjectToFile target (M.File (moduleName ++ ".o")) llModule
 
   -- link the object file
-  -- liftIO $ callCommand $ "ld -macosx_version_min 10.12 -arch x86_64 -lSystem -o assembly assembly.o"
+  liftIO $ callCommand $ "ld -macosx_version_min 10.12 -arch x86_64 -lSystem -o assembly assembly.o"

@@ -8,19 +8,38 @@ import Codegen
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Short as S
 
-intExpr = Add (Ref TInt32 "x") (Sub (Ref TInt32 "y") (Int32 3))
-floatExpr = Add (Add (Float32 1.0) (Float32 2.0)) (Sub (Float32 5.0) (Float32 3.0))
+fadd = Function {
+    fName = "fadd"
+  , fReturnType = TFloat32
+  , fParams = [Param "x" TFloat32, Param "y" TFloat32]
+  , fExpr = Add (Add (Float32 1.0) (Float32 2.0)) (Sub (Float32 5.0) (Float32 3.0))
+  }
+iadd = Function {
+    fName = "iadd"
+  , fReturnType = TInt32
+  , fParams = [Param "x" TInt32, Param "y" TInt32]
+  , fExpr = Add (Ref TInt32 "x") (Sub (Ref TInt32 "y") (Int32 3))
+  }
+inc = Function {
+    fName = "inc"
+  , fReturnType = TInt32
+  , fParams = [Param "x" TInt32]
+  , fExpr = Add (Ref TInt32 "x") (Int32 1)
+  }
+doubleInc = Function {
+    fName = "doubleInc"
+  , fReturnType = TInt32
+  , fParams = [Param "x" TInt32]
+  , fExpr = Call "inc" TInt32 [TInt32] [Call "inc" TInt32 [TInt32] [Ref TInt32 "x"]]
+  }
+mainFunc = Function {
+    fName = "main"
+  , fReturnType = TInt32
+  , fParams = []
+  , fExpr = Call "doubleInc" TInt32 [TInt32] [Int32 (-2)]
+  }
 
-intParamX = Param { pName = "x", pType = TInt32 }
-intParamY = Param { pName = "y", pType = TInt32 }
-
-floatParamX = Param { pName = "x", pType = TFloat32 }
-floatParamY = Param { pName = "y", pType = TFloat32 }
-
-intFunc = Function { fName = "iadd", fReturnType = TInt32, fParams = [intParamX, intParamY], fExpr = intExpr }
-floatFunc = Function { fName = "fadd", fReturnType = TFloat32, fParams = [floatParamX, floatParamY], fExpr = floatExpr }
-
-irModule = Module { mName = "assembly", mSource = "source.silver", mFunctions = [floatFunc, intFunc] }
+irModule = Module { mName = "assembly", mSource = "source.silver", mFunctions = [fadd, iadd, inc, doubleInc, mainFunc] }
 
 -- TODO IR Ref should check function params if it exists
 -- TODO execution engine
