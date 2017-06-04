@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns #-}
-module Codegen where
+module Codegen (codegen, evalCodegen, codegenFuncs) where
 
 import Control.Monad.Cont
 import Control.Monad.Except
@@ -36,11 +36,19 @@ int32Type = IntegerType 32
 float32Type :: Type
 float32Type = FloatingPointType FloatFP
 
+irToLlvmType :: I.Type -> Type
+irToLlvmType I.TInt32 = int32Type
+irToLlvmType I.TFloat32 = float32Type
+
+irToLlvmParam :: I.Param -> Parameter
+irToLlvmParam I.Param { I.pName, I.pType } = Parameter (irToLlvmType pType) (Name pName) []
+
 -- definitions
-func :: Type -> ShortByteString -> [BasicBlock] -> Definition
-func returnType name blocks = GlobalDefinition $
+func :: Type -> [Parameter] -> ShortByteString -> [BasicBlock] -> Definition
+func returnType params name blocks = GlobalDefinition $
     functionDefaults {
       returnType = returnType
+    , parameters = (params, False)
     , name = Name name
     , basicBlocks = blocks }
 
@@ -120,6 +128,11 @@ append i = do
   instructions <- gets cInstructions
   modify $ \state -> state { cInstructions = i : instructions }
 
+-- | clear function state
+clear :: Codegen ()
+clear = do
+  modify $ \state -> state { cInstructions = [], cId = 0 }
+
 -- | this function will throwError if the types do not match
 checkType :: (I.Expr, Type) -> (I.Expr, Type) -> Codegen ()
 checkType (aExpr, aType) (bExpr, bType) = do
@@ -128,12 +141,15 @@ checkType (aExpr, aType) (bExpr, bType) = do
     else throwError (MismatchType aExpr aType bExpr bType)
 
 -- | create a "main" function for the given ir expression
-codegenAstModule :: I.Expr -> Codegen ()
-codegenAstModule expr = do
-  codegenExpr expr
+codegenFunc :: I.Function -> Codegen ()
+codegenFunc I.Function { I.fName, I.fReturnType, I.fParams, I.fExpr } = do
+  codegenExpr fExpr
   instructions <- gets cInstructions
   id <- gets cId
-  addFunc (id - 1) instructions
+  addFunc fName (irToLlvmType fReturnType) (map irToLlvmParam fParams) (id - 1) instructions
+
+codegenFuncs :: [I.Function] -> Codegen ()
+codegenFuncs fs = forM_ fs (\f -> codegenFunc f >> clear)
 
 -- | given an IR expression, create the llvm instructions for it.
 codegenExpr :: I.Expr -> Codegen (Operand, Type)
@@ -168,17 +184,15 @@ subType t a b
   | t == float32Type = fsub a b
   | otherwise = undefined
 
-addFunc :: Word -> [Named Instruction] -> Codegen ()
-addFunc returnId instructions = do
-  let f = makeFunc returnId instructions
+addFunc :: ShortByteString -> Type -> [Parameter] -> Word -> [Named Instruction] -> Codegen ()
+addFunc name rType params returnId instructions = do
+  let f = func rType params name [ block "entry" instructions (ret (ref (UnName returnId) rType)) ]
+
   oldModule <- gets cModule
   let moduleDefinitions = A.moduleDefinitions oldModule
   let newModule = oldModule { A.moduleDefinitions = moduleDefinitions ++ [f] }
 
   modify $ \state -> state { cModule = newModule }
-
-makeFunc :: Word -> [Named Instruction] -> Definition
-makeFunc returnId instructions = func float32Type "main" [ block "entry" instructions (ret (ref (UnName returnId) float32Type)) ]
 
 -- | This function turns the `withContext` function into a continuation.
 makeContext :: ContT a IO Context
@@ -211,4 +225,4 @@ codegen astModule = (flip runContT) return $ do
   liftIO $ M.writeObjectToFile target (M.File "assembly.o") llModule
 
   -- link the object file
-  liftIO $ callCommand $ "ld -macosx_version_min 10.12 -arch x86_64 -lSystem -o assembly assembly.o"
+  -- liftIO $ callCommand $ "ld -macosx_version_min 10.12 -arch x86_64 -lSystem -o assembly assembly.o"
