@@ -15,5 +15,5 @@ main :: IO ()
 main = do
   let llfile = "assembly.ll"
   let sourcefile = "source.silver"
-  let mod = evalCodegen sourcefile llfile $ mkAstModule ast
-  codegen mod
+  let modEither = evalCodegen sourcefile llfile $ codegenAstModule ast
+  either print codegen modEither
