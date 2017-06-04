@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns #-}
-module Codegen (codegen, evalCodegen, codegenFuncs) where
+module Codegen (codegen) where
 
 import Control.Monad.Cont
 import Control.Monad.Except
@@ -140,6 +140,13 @@ checkType (aExpr, aType) (bExpr, bType) = do
     then return ()
     else throwError (MismatchType aExpr aType bExpr bType)
 
+codegenModule :: I.Module -> Either CodegenError A.Module
+codegenModule I.Module { I.mName, I.mSource, I.mFunctions } =
+  evalCodegen mSource mName (codegenFuncs mFunctions)
+
+codegenFuncs :: [I.Function] -> Codegen ()
+codegenFuncs fs = forM_ fs (\f -> codegenFunc f >> clear)
+
 -- | create a "main" function for the given ir expression
 codegenFunc :: I.Function -> Codegen ()
 codegenFunc I.Function { I.fName, I.fReturnType, I.fParams, I.fExpr } = do
@@ -147,9 +154,6 @@ codegenFunc I.Function { I.fName, I.fReturnType, I.fParams, I.fExpr } = do
   instructions <- gets cInstructions
   id <- gets cId
   addFunc fName (irToLlvmType fReturnType) (map irToLlvmParam fParams) (id - 1) instructions
-
-codegenFuncs :: [I.Function] -> Codegen ()
-codegenFuncs fs = forM_ fs (\f -> codegenFunc f >> clear)
 
 -- | given an IR expression, create the llvm instructions for it.
 codegenExpr :: I.Expr -> Codegen (Operand, Type)
@@ -194,6 +198,12 @@ addFunc name rType params returnId instructions = do
 
   modify $ \state -> state { cModule = newModule }
 
+codegen :: I.Module -> IO (Either CodegenError ())
+codegen irModule =
+  case (codegenModule irModule) of
+    Left e -> return $ Left e
+    Right astModule -> llvmCodegen astModule >> return (Right ())
+
 -- | This function turns the `withContext` function into a continuation.
 makeContext :: ContT a IO Context
 makeContext = ContT withContext
@@ -209,9 +219,8 @@ makeHostTargetMachine = ContT withHostTargetMachine
 -- | This function will take an ast module, and link it into a runnable executable.
 -- It will create 3 files, "assembly.ll" for debugging, "assembly.o" for linking
 -- and "assembly" an executable.
-codegen :: A.Module -> IO ()
-codegen astModule = (flip runContT) return $ do
-
+llvmCodegen :: A.Module -> IO ()
+llvmCodegen astModule = (flip runContT) return $ do
   -- make a context
   ctx <- makeContext
   llModule <- makeLLVMModule ctx astModule

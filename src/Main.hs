@@ -21,9 +21,9 @@ floatParamY = Param { pName = "y", pType = TFloat32 }
 intFunc = Function { fName = "iadd", fReturnType = TInt32, fParams = [intParamX, intParamY], fExpr = intExpr }
 floatFunc = Function { fName = "fadd", fReturnType = TFloat32, fParams = [floatParamX, floatParamY], fExpr = floatExpr }
 
+irModule = Module { mName = "assembly", mSource = "source.silver", mFunctions = [floatFunc, intFunc] }
+
 main :: IO ()
 main = do
-  let llfile = "assembly.ll"
-  let sourcefile = "source.silver"
-  let modEither = evalCodegen sourcefile llfile $ codegenFuncs [floatFunc, intFunc]
-  either print codegen modEither
+  result <- codegen irModule
+  either print return result

@@ -22,3 +22,7 @@ data Param =
 data Function =
     Function { fName :: ShortByteString, fReturnType :: Type, fParams :: [Param], fExpr :: Expr }
   deriving (Show, Eq)
+
+data Module =
+    Module { mName :: ShortByteString, mSource :: ShortByteString, mFunctions :: [Function] }
+  deriving (Show, Eq)

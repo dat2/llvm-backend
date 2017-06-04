@@ -1,4 +1,4 @@
-; ModuleID = 'assembly.ll'
+; ModuleID = 'assembly'
 source_filename = "source.silver"
 
 define float @fadd(float %x, float %y) {
