@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns #-}
 module Codegen (codegen) where
@@ -6,6 +5,7 @@ module Codegen (codegen) where
 import Control.Monad.Cont
 import Control.Monad.Except
 import Control.Monad.State
+import Data.String
 import System.Process
 
 import LLVM.Analysis
@@ -41,20 +41,20 @@ irToLlvmType I.TInt32 = int32Type
 irToLlvmType I.TFloat32 = float32Type
 
 irToLlvmParam :: I.Param -> Parameter
-irToLlvmParam I.Param { I.pName, I.pType } = Parameter (irToLlvmType pType) (Name pName) []
+irToLlvmParam I.Param { I.pName, I.pType } = Parameter (irToLlvmType pType) (Name (fromString pName)) []
 
 -- definitions
-func :: Type -> [Parameter] -> ShortByteString -> [BasicBlock] -> Definition
+func :: Type -> [Parameter] -> String -> [BasicBlock] -> Definition
 func returnType params name blocks = GlobalDefinition $
     functionDefaults {
       returnType = returnType
     , parameters = (params, False)
-    , name = Name name
+    , name = Name (fromString name)
     , basicBlocks = blocks }
 
 -- blocks
-block :: ShortByteString -> [Named Instruction] -> Named Terminator -> BasicBlock
-block name instructions terminator = BasicBlock (Name name) instructions terminator
+block :: String -> [Named Instruction] -> Named Terminator -> BasicBlock
+block name instructions terminator = BasicBlock (Name (fromString name)) instructions terminator
 
 -- instructions
 iadd32 :: Operand -> Operand -> Instruction
@@ -84,10 +84,10 @@ float32 :: Float -> Operand
 float32 = ConstantOperand . Float . Single
 
 -- create a fake module
-initialModule :: ShortByteString -> ShortByteString -> A.Module
+initialModule :: String -> String -> A.Module
 initialModule source name = A.defaultModule {
-    A.moduleName = name
-  , A.moduleSourceFileName = source
+    A.moduleName = (fromString name)
+  , A.moduleSourceFileName = (fromString source)
   , A.moduleDefinitions = [ ]
   }
 
@@ -95,7 +95,7 @@ initialModule source name = A.defaultModule {
 data CodegenState = CodegenState { cId :: Word, cInstructions :: [Named Instruction], cModule :: A.Module }
   deriving (Show, Eq)
 
-initialState :: ShortByteString -> ShortByteString -> CodegenState
+initialState :: String -> String -> CodegenState
 initialState sourceName moduleName = CodegenState { cId = 0, cInstructions = [], cModule = initialModule sourceName moduleName  }
 
 data CodegenError =
@@ -105,7 +105,7 @@ data CodegenError =
 newtype Codegen a = Codegen { runCodegen :: ExceptT CodegenError (State CodegenState) a }
   deriving (Functor, Applicative, Monad, MonadState CodegenState, MonadError CodegenError)
 
-evalCodegen :: ShortByteString -> ShortByteString -> Codegen () -> Either CodegenError A.Module
+evalCodegen :: String -> String -> Codegen () -> Either CodegenError A.Module
 evalCodegen sourceName moduleName c =
   let
     s = (initialState sourceName moduleName)
@@ -153,11 +153,11 @@ codegenFunc I.Function { I.fName, I.fReturnType, I.fParams, I.fExpr } = do
   codegenExpr fExpr
   instructions <- gets cInstructions
   id <- gets cId
-  addFunc fName (irToLlvmType fReturnType) (map irToLlvmParam fParams) (id - 1) instructions
+  addFunc (fromString fName) (irToLlvmType fReturnType) (map irToLlvmParam fParams) (id - 1) instructions
 
 -- | given an IR expression, create the llvm instructions for it.
 codegenExpr :: I.Expr -> Codegen (Operand, Type)
-codegenExpr (I.Ref t n) = return $ (LocalReference (irToLlvmType t) (Name n), irToLlvmType t)
+codegenExpr (I.Ref t n) = return $ (LocalReference (irToLlvmType t) (Name (fromString n)), irToLlvmType t)
 codegenExpr (I.Int32 i) = return $ (int32 i, int32Type)
 codegenExpr (I.Float32 f) = return $ (float32 f, float32Type)
 codegenExpr (I.Add a b) = do
@@ -189,7 +189,7 @@ subType t a b
   | t == float32Type = fsub a b
   | otherwise = undefined
 
-addFunc :: ShortByteString -> Type -> [Parameter] -> Word -> [Named Instruction] -> Codegen ()
+addFunc :: String -> Type -> [Parameter] -> Word -> [Named Instruction] -> Codegen ()
 addFunc name rType params returnId instructions = do
   let f = func rType params name [ block "entry" instructions (ret (ref (UnName returnId) rType)) ]
 
@@ -203,7 +203,7 @@ codegen :: I.Module -> IO (Either CodegenError ())
 codegen irModule =
   case (codegenModule irModule) of
     Left e -> return $ Left e
-    Right astModule -> llvmCodegen astModule >> return (Right ())
+    Right astModule -> llvmCodegen (I.mName irModule) astModule >> return (Right ())
 
 -- | This function turns the `withContext` function into a continuation.
 makeContext :: ContT a IO Context
@@ -220,19 +220,19 @@ makeHostTargetMachine = ContT withHostTargetMachine
 -- | This function will take an ast module, and link it into a runnable executable.
 -- It will create 3 files, "assembly.ll" for debugging, "assembly.o" for linking
 -- and "assembly" an executable.
-llvmCodegen :: A.Module -> IO ()
-llvmCodegen astModule = (flip runContT) return $ do
+llvmCodegen :: String -> A.Module -> IO ()
+llvmCodegen moduleName astModule = (flip runContT) return $ do
   -- make a context
   ctx <- makeContext
   llModule <- makeLLVMModule ctx astModule
 
   -- check that it works
-  liftIO $ M.writeLLVMAssemblyToFile (M.File "assembly.ll") llModule
+  liftIO $ M.writeLLVMAssemblyToFile (M.File (moduleName ++ ".ll")) llModule
   liftIO $ verify llModule
 
   -- create an object file
   target <- makeHostTargetMachine
-  liftIO $ M.writeObjectToFile target (M.File "assembly.o") llModule
+  liftIO $ M.writeObjectToFile target (M.File (moduleName ++ ".o")) llModule
 
   -- link the object file
   -- liftIO $ callCommand $ "ld -macosx_version_min 10.12 -arch x86_64 -lSystem -o assembly assembly.o"

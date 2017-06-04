@@ -1,14 +1,11 @@
 module IR where
 
-import Data.ByteString.Short (ShortByteString)
-
-
 data Expr =
     Int32 Integer
   | Float32 Float
   | Add Expr Expr
   | Sub Expr Expr
-  | Ref Type ShortByteString
+  | Ref Type String
   deriving (Show, Eq)
 
 data Type =
@@ -17,13 +14,13 @@ data Type =
   deriving (Show, Eq)
 
 data Param =
-    Param { pName :: ShortByteString, pType :: Type }
+    Param { pName :: String, pType :: Type }
   deriving (Show, Eq)
 
 data Function =
-    Function { fName :: ShortByteString, fReturnType :: Type, fParams :: [Param], fExpr :: Expr }
+    Function { fName :: String, fReturnType :: Type, fParams :: [Param], fExpr :: Expr }
   deriving (Show, Eq)
 
 data Module =
-    Module { mName :: ShortByteString, mSource :: ShortByteString, mFunctions :: [Function] }
+    Module { mName :: String, mSource :: String, mFunctions :: [Function] }
   deriving (Show, Eq)
