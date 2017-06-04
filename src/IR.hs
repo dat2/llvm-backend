@@ -8,6 +8,7 @@ data Expr =
   | Float32 Float
   | Add Expr Expr
   | Sub Expr Expr
+  | Ref Type ShortByteString
   deriving (Show, Eq)
 
 data Type =

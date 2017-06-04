@@ -126,7 +126,7 @@ nextId = do
 append :: Named Instruction -> Codegen ()
 append i = do
   instructions <- gets cInstructions
-  modify $ \state -> state { cInstructions = i : instructions }
+  modify $ \state -> state { cInstructions = instructions ++ [i] }
 
 -- | clear function state
 clear :: Codegen ()
@@ -157,6 +157,7 @@ codegenFunc I.Function { I.fName, I.fReturnType, I.fParams, I.fExpr } = do
 
 -- | given an IR expression, create the llvm instructions for it.
 codegenExpr :: I.Expr -> Codegen (Operand, Type)
+codegenExpr (I.Ref t n) = return $ (LocalReference (irToLlvmType t) (Name n), irToLlvmType t)
 codegenExpr (I.Int32 i) = return $ (int32 i, int32Type)
 codegenExpr (I.Float32 f) = return $ (float32 f, float32Type)
 codegenExpr (I.Add a b) = do
@@ -226,8 +227,8 @@ llvmCodegen astModule = (flip runContT) return $ do
   llModule <- makeLLVMModule ctx astModule
 
   -- check that it works
-  liftIO $ verify llModule
   liftIO $ M.writeLLVMAssemblyToFile (M.File "assembly.ll") llModule
+  liftIO $ verify llModule
 
   -- create an object file
   target <- makeHostTargetMachine
