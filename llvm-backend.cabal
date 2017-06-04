@@ -1,8 +1,8 @@
-name:                llvm-practice
+name:                llvm-backend
 version:             0.1.0.0
 -- synopsis:
 -- description:
-homepage:            https://github.com/dat2/llvm-practice#readme
+homepage:            https://github.com/dat2/llvm-backend#readme
 license:             MIT
 license-file:        LICENSE
 author:              Nicholas Dujay
@@ -13,7 +13,7 @@ build-type:          Simple
 cabal-version:       >=1.10
 extra-source-files:  README.md
 
-executable llvm-practice
+executable llvm-backend
   hs-source-dirs:      src
   main-is:             Main.hs
   other-modules:
