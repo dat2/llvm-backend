@@ -89,24 +89,19 @@ data CodegenState = CodegenState { cId :: Word, cInstructions :: [Named Instruct
 initialState :: ShortByteString -> ShortByteString -> CodegenState
 initialState sourceName moduleName = CodegenState { cId = 0, cInstructions = [], cModule = initialModule sourceName moduleName  }
 
-newtype Codegen a b = Codegen { runCodegen :: StateT CodegenState (ContT a IO) b }
-  deriving (Functor, Applicative, Monad, MonadState CodegenState, MonadCont, MonadIO)
+newtype Codegen a = Codegen { runCodegen :: State CodegenState a }
+  deriving (Functor, Applicative, Monad, MonadState CodegenState)
 
-evalCodegen :: ShortByteString -> ShortByteString -> Codegen () () -> IO ()
-evalCodegen sourceName moduleName = (flip runContT) return . (flip evalStateT) (initialState sourceName moduleName) . runCodegen
+evalCodegen :: ShortByteString -> ShortByteString -> Codegen () -> A.Module
+evalCodegen sourceName moduleName c = cModule $ execState (runCodegen c) (initialState sourceName moduleName)
 
-liftCont :: ContT a IO b -> Codegen a b
-liftCont cont = Codegen $ StateT $ \state -> do
-  r <- cont
-  return (r, state)
-
-nextId :: Codegen a Word
+nextId :: Codegen Word
 nextId = do
   id <- gets cId
   modify $ \state -> state { cId = id + 1 }
   return id
 
-append :: Named Instruction -> Codegen a ()
+append :: Named Instruction -> Codegen ()
 append i = do
   instructions <- gets cInstructions
   modify $ \state -> state { cInstructions = i : instructions }
@@ -114,7 +109,7 @@ append i = do
 makeFunc :: Word -> [Named Instruction] -> Definition
 makeFunc returnId instructions = func float32Type "main" [ block "entry" instructions (ret (ref (UnName returnId) float32Type)) ]
 
-addFunc :: Word -> [Named Instruction] -> Codegen a ()
+addFunc :: Word -> [Named Instruction] -> Codegen ()
 addFunc returnId instructions = do
   let f = makeFunc returnId instructions
   oldModule <- gets cModule
@@ -135,7 +130,7 @@ typedSub t a b
   | t == float32Type = fsub a b
   | otherwise = undefined
 
-genExpr :: I.Expr -> Codegen a (Operand, Type)
+genExpr :: I.Expr -> Codegen (Operand, Type)
 genExpr (I.Int32 i) = return $ (int32 i, int32Type)
 genExpr (I.Float32 f) = return $ (float32 f, float32Type)
 genExpr (I.Add a b) = do
@@ -153,6 +148,13 @@ genExpr (I.Sub a b) = do
   append $ UnName id := typedSub aType aOp bOp
   return $ (LocalReference aType (UnName id), aType)
 
+mkAstModule :: I.Expr -> Codegen ()
+mkAstModule expr = do
+  genExpr expr
+  instructions <- gets cInstructions
+  id <- gets cId
+  addFunc (id - 1) instructions
+
 context :: ContT a IO Context
 context = ContT withContext
 
@@ -162,26 +164,19 @@ makeModule c m = ContT $ M.withModuleFromAST c m
 hostTargetMachine :: ContT a IO TargetMachine
 hostTargetMachine = ContT withHostTargetMachine
 
-codegen :: Codegen a () -> Codegen a ()
-codegen genBody = do
-
-  -- generate the expression
-  genBody
-  instructions <- gets cInstructions
-  id <- gets cId
-  addFunc (id - 1) instructions
-  mod <- gets cModule
+codegen :: A.Module -> IO ()
+codegen mod = (flip runContT) return $ do
 
   -- make a context
-  ctx <- liftCont context
-  llModule <- liftCont $ makeModule ctx mod
+  ctx <- context
+  llModule <- makeModule ctx mod
 
   -- check that it works
   liftIO $ verify llModule
   liftIO $ M.writeLLVMAssemblyToFile (M.File "assembly.ll") llModule
 
   -- create an object file
-  target <- liftCont $ hostTargetMachine
+  target <- hostTargetMachine
   liftIO $ M.writeObjectToFile target (M.File "assembly.o") llModule
 
   -- link the object file

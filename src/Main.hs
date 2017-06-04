@@ -15,4 +15,5 @@ main :: IO ()
 main = do
   let llfile = "assembly.ll"
   let sourcefile = "source.silver"
-  evalCodegen sourcefile llfile (codegen (genExpr ast >> return ()))
+  let mod = evalCodegen sourcefile llfile $ mkAstModule ast
+  codegen mod
