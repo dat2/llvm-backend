@@ -48,17 +48,17 @@ block :: ShortByteString -> [Named Instruction] -> Named Terminator -> BasicBloc
 block name instructions terminator = BasicBlock (Name name) instructions terminator
 
 -- instructions
-add :: Operand -> Operand -> Instruction
-add a b = Add False False a b []
+iadd32 :: Operand -> Operand -> Instruction
+iadd32 a b = Add False True a b []
 
 fadd :: Operand -> Operand -> Instruction
-fadd a b = FAdd NoFastMathFlags a b []
+fadd a b = FAdd (FastMathFlags True True True True) a b []
 
-sub :: Operand -> Operand -> Instruction
-sub a b = Sub False False a b []
+isub32 :: Operand -> Operand -> Instruction
+isub32 a b = Sub False True a b []
 
 fsub :: Operand -> Operand -> Instruction
-fsub a b = FSub NoFastMathFlags a b []
+fsub a b = FSub (FastMathFlags True True True True) a b []
 
 -- terminators
 ret :: Operand -> Named Terminator
@@ -111,37 +111,35 @@ append i = do
   instructions <- gets codegenInstructions
   modify $ \state -> state { codegenInstructions = i : instructions }
 
-genExpr :: I.Expr -> Codegen a (Operand, Type)
-genExpr (I.ConstInt i) = return $ (int32 i, int32Type)
-genExpr (I.Add a b) = do
-  (a_op, a_type) <- genExpr a
-  (b_op, b_type) <- genExpr b
-  -- assuming a_type == b_type
-  id <- nextId
-  append $ UnName id := add a_op b_op
-  return $ (LocalReference a_type (UnName id), a_type)
-genExpr (I.Sub a b) = do
-  (a_op, a_type) <- genExpr a
-  (b_op, b_type) <- genExpr b
-  id <- nextId
-  -- assuming a_type == b_type
-  append $ UnName id := sub a_op b_op
-  return $ (LocalReference a_type (UnName id), a_type)
+typedAdd :: Type -> Operand -> Operand -> Instruction
+typedAdd t a b
+  | t == int32Type = iadd32 a b
+  | t == float32Type = fadd a b
+  | otherwise = undefined
 
-genFloatExpr :: I.FloatExpr -> Codegen a (Operand, Type)
-genFloatExpr (I.ConstFloat f) = return $ (float32 f, float32Type)
-genFloatExpr (I.FAdd a b) = do
-  (a_op, a_type) <- genFloatExpr a
-  (b_op, b_type) <- genFloatExpr b
+typedSub :: Type -> Operand -> Operand -> Instruction
+typedSub t a b
+  | t == int32Type = isub32 a b
+  | t == float32Type = fsub a b
+  | otherwise = undefined
+
+genExpr :: I.Expr -> Codegen a (Operand, Type)
+genExpr (I.Int32 i) = return $ (int32 i, int32Type)
+genExpr (I.Float32 f) = return $ (float32 f, float32Type)
+genExpr (I.Add a b) = do
+  (aOp, aType) <- genExpr a
+  (bOp, bType) <- genExpr b
+  -- assuming aType == bType
   id <- nextId
-  append $ UnName id := fadd a_op b_op
-  return $ (LocalReference a_type (UnName id), a_type)
-genFloatExpr (I.FSub a b) = do
-  (a_op, a_type) <- genFloatExpr a
-  (b_op, b_type) <- genFloatExpr b
+  append $ UnName id := typedAdd aType aOp bOp
+  return $ (LocalReference aType (UnName id), aType)
+genExpr (I.Sub a b) = do
+  (aOp, aType) <- genExpr a
+  (bOp, bType) <- genExpr b
   id <- nextId
-  append $ UnName id := fsub a_op b_op
-  return $ (LocalReference a_type (UnName id), a_type)
+  -- assuming aType == bType
+  append $ UnName id := typedSub aType aOp bOp
+  return $ (LocalReference aType (UnName id), aType)
 
 context :: ContT a IO Context
 context = ContT withContext
