@@ -47,7 +47,7 @@ mainFunc =
   { fName = "main"
   , fReturnType = TInt32
   , fParams = []
-  , fExpr = Call "doubleInc" TInt32 [TInt32] [Int32 (-2)]
+  , fExpr = Call "doubleInc" TInt32 [TInt32] [Int32 5]
   }
 
 irModule :: Module
@@ -63,6 +63,8 @@ irModule =
 -- TODO all integer types
 -- TODO string type
 main :: IO ()
-main = do
-  result <- codegen irModule
-  either print return result
+main
+  -- result <- codegen irModule
+ = do
+  result <- execute irModule
+  either print print result

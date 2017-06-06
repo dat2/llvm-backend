@@ -1,19 +1,25 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns             #-}
+{-# LANGUAGE OverloadedStrings          #-}
 
 module Codegen
   ( codegen
+  , execute
   ) where
 
 import           Control.Monad.Cont
 import           Control.Monad.Except
 import           Control.Monad.State
+import           Data.Int
 import           Data.String
+import           Foreign.Ptr
 import           System.Process
 
 import           LLVM.Analysis
 import           LLVM.Internal.Context
 import           LLVM.Internal.Target
+import           LLVM.OrcJIT
+import           LLVM.OrcJIT.IRCompileLayer (IRCompileLayer, withIRCompileLayer)
 
 import           LLVM.AST                   (Definition (..))
 import           LLVM.AST.CallingConvention
@@ -28,6 +34,7 @@ import           LLVM.AST.Type
 import qualified IR                         as I
 import qualified LLVM.AST                   as A
 import qualified LLVM.Module                as M
+import qualified LLVM.OrcJIT.IRCompileLayer as IRCompileLayer
 
 -- types
 int32Type :: Type
@@ -256,6 +263,12 @@ codegen irModule =
     Right astModule ->
       llvmCodegen (I.mName irModule) astModule >> return (Right ())
 
+execute :: I.Module -> IO (Either CodegenError Int32)
+execute irModule =
+  case codegenModule irModule of
+    Left e          -> return $ Left e
+    Right astModule -> Right <$> llvmExecute astModule
+
 -- | This function turns the `withContext` function into a continuation.
 makeContext :: ContT a IO Context
 makeContext = ContT withContext
@@ -288,3 +301,47 @@ llvmCodegen moduleName astModule =
     liftIO $
       callCommand
         "ld -macosx_version_min 10.12 -arch x86_64 -lSystem -o assembly assembly.o"
+
+foreign import ccall "dynamic" mkMain ::
+               FunPtr (IO Int32) -> IO Int32
+
+makeObjectLinkingLayer :: ContT a IO ObjectLinkingLayer
+makeObjectLinkingLayer = ContT withObjectLinkingLayer
+
+makeIRCompileLayer ::
+     ObjectLinkingLayer -> TargetMachine -> ContT a IO IRCompileLayer
+makeIRCompileLayer objectLayer target =
+  ContT $ withIRCompileLayer objectLayer target
+
+resolver :: IRCompileLayer -> MangledSymbol -> IO JITSymbol
+resolver compileLayer symbol =
+  IRCompileLayer.findSymbol compileLayer symbol True
+
+nullResolver :: MangledSymbol -> IO JITSymbol
+nullResolver _ = return (JITSymbol 0 (JITSymbolFlags False False))
+
+makeModuleSet ::
+     IRCompileLayer -> M.Module -> ContT a IO IRCompileLayer.ModuleSet
+makeModuleSet compileLayer llModule =
+  ContT $
+  IRCompileLayer.withModuleSet
+    compileLayer
+    [llModule]
+    (SymbolResolver (resolver compileLayer) nullResolver)
+
+llvmExecute :: A.Module -> IO Int32
+llvmExecute astModule =
+  flip runContT return $
+  -- make a context
+   do
+    ctx <- makeContext
+    llModule <- makeLLVMModule ctx astModule
+  -- check that it works
+    liftIO $ verify llModule
+    target <- makeHostTargetMachine
+    objectLayer <- makeObjectLinkingLayer
+    compileLayer <- makeIRCompileLayer objectLayer target
+    mainFunc <- liftIO $ IRCompileLayer.mangleSymbol compileLayer "main"
+    _moduleSet <- makeModuleSet compileLayer llModule
+    JITSymbol mainFn _ <- liftIO $ resolver compileLayer mainFunc
+    liftIO $ mkMain (castPtrToFunPtr (wordPtrToPtr mainFn))
